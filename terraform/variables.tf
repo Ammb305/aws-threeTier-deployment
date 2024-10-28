@@ -6,4 +6,5 @@ variable "vpc_cidr" {
 variable "key_name" {
   type        = string
   description = "SSH key name"
+  default     = "three-tier"
 }
