@@ -36,28 +36,126 @@ resource "aws_instance" "bastion_host" {
 # -------------------------------------------------------------------------------------------------------------------
 # Presentation EC2 Instance (Launch Template)
 resource "aws_launch_template" "presentation_host" {
-  image_id              = "ami-005fc0f236362e99f"  # Use the confirmed AMI ID
+  image_id              = "ami-06b21ccaeff8cd686"  # Use the confirmed AMI ID
   instance_type         = "t2.micro"  # Free Tier eligible instance type
   vpc_security_group_ids = [aws_security_group.Presentation_EC2.id]
   key_name              = var.key_name
 
   user_data = base64encode(<<-EOF
   #!/bin/bash
-  sudo apt update -y
-  sudo apt install nginx -y
-  sudo systemctl start nginx
-  sudo systemctl enable nginx
+# Update package list and install required packages
+sudo yum update -y
+sudo yum install -y git
 
-  echo "Healthy" | sudo tee /var/www/html/health
+# Install Node.js (use NodeSource for the latest version)
+curl -fsSL https://rpm.nodesource.com/setup_18.x | sudo bash -
+sudo yum install -y nodejs
 
-  sudo bash -c "cat > /var/www/html/index.html <<HTML
-  <h1>Instance Details</h1>
-  <p><b>Instance ID:</b> \$(curl -s http://169.254.169.254/latest/meta-data/instance-id)</p>
-  <p><b>Availability Zone:</b> \$(curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone)</p>
-  <p><b>Public IP:</b> \$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4)</p>
-  HTML"
+# Install NGINX
+sudo yum install -y nginx
 
-  sudo systemctl restart nginx
+# Start and enable NGINX
+sudo systemctl start nginx
+sudo systemctl enable nginx
+
+# Define variables
+REPO_URL="https://github.com/Ammb305/aws-threeTier-deployment.git"
+BRANCH_NAME="feature/add-logging"
+REPO_DIR="/home/ec2-user/aws-threeTier-deployment/frontend"
+ENV_FILE="$REPO_DIR/.env"
+APP_TIER_ALB_URL="http://internal-application-loadBalancer-1072175246.us-east-1.elb.amazonaws.com"  # Replace with your actual alb endpoint
+API_URL="/api"
+
+# Clone the repository as ec2-user
+cd /home/ec2-user
+sudo -u ec2-user git clone $REPO_URL
+cd aws-threeTier-deployment
+
+# Checkout to the specific branch
+sudo -u ec2-user git checkout $BRANCH_NAME
+cd frontend
+
+# Ensure ec2-user owns the directory
+sudo chown -R ec2-user:ec2-user /home/ec2-user/aws-threeTier-deployment
+
+# Create .env file with the API_URL
+echo "VITE_API_URL=\"$API_URL\"" >> "$ENV_FILE"
+
+# Install Node.js dependencies as ec2-user
+sudo -u ec2-user npm install
+
+# Build the frontend application as ec2-user
+sudo -u ec2-user npm run build
+
+# Copy the build files to the NGINX directory
+sudo cp -r dist /usr/share/nginx/html/
+
+# Update NGINX configuration
+NGINX_CONF="/etc/nginx/nginx.conf"
+SERVER_NAME="<learningdevops.site www.learningdevops.site>"  # Replace with your actual domain name
+
+# Backup existing NGINX configuration
+sudo cp $NGINX_CONF $${NGINX_CONF}.bak
+
+# Write new NGINX configuration
+sudo tee $NGINX_CONF > /dev/null <<EOL
+user nginx;
+worker_processes auto;
+
+error_log /var/log/nginx/error.log warn;
+pid /run/nginx.pid;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+
+    log_format main '\$remote_addr - \$remote_user [\$time_local] "\$request" '
+                    '\$status \$body_bytes_sent "\$http_referer" '
+                    '"\$http_user_agent" "\$http_x_forwarded_for"';
+
+    access_log /var/log/nginx/access.log main;
+
+    sendfile on;
+    tcp_nopush on;
+    tcp_nodelay on;
+    keepalive_timeout 65;
+    types_hash_max_size 2048;
+
+    include /etc/nginx/conf.d/*.conf;
+}
+EOL
+
+# Create a separate NGINX configuration file
+sudo tee /etc/nginx/conf.d/presentation-tier.conf > /dev/null <<EOL
+server {
+    listen 80;
+    server_name $SERVER_NAME;
+    root /usr/share/nginx/html/dist;
+    index index.html index.htm;
+
+    #health check
+    location /health {
+        default_type text/html;
+        return 200 "<!DOCTYPE html><p>Health check endpoint</p>\n";
+    }
+
+    location / {
+        try_files \$uri /index.html;
+    }
+
+    location /api/ {
+        proxy_pass $APP_TIER_ALB_URL;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+EOL
 EOF
 )
 
@@ -195,11 +293,11 @@ ENV_FILE="$REPO_DIR/.env"
 
 # Clone the repository 
 cd /home/ec2-user 
-git clone $REPO_URL 
+sudo -u ec2-user git clone $REPO_URL 
 cd aws-threeTier-deployment
 
 # Checkout to the specific branch 
-git checkout $BRANCH_NAME 
+sudo -u ec2-user git checkout $BRANCH_NAME 
 cd backend 
 
 # Define the log directory and ensure it exists 
@@ -216,14 +314,18 @@ echo "DB_PASSWORD=\"admin123\"" >> "$ENV_FILE"  # Replace with actual password
 echo "DB_NAME=\"MySQLdatabase\"" >> "$ENV_FILE"
 
 # Install Node.js dependencies as ec2-user
-npm install
+sudo -u ec2-user npm install
 
 # Start the application using PM2 as ec2-user
-pm2 start server.js --name "my-app" # Make sure you specify the correct entry file
+sudo -u ec2-user pm2 start server.js --name "my-app" # Make sure you specify the correct entry file
 
 # Ensure PM2 restarts on reboot
-pm2 startup systemd 
-pm2 save
+sudo -u ec2-user pm2 startup systemd 
+sudo -u ec2-user pm2 save
+
+# Add a sleep command if necessary to ensure dependencies are ready
+sleep 5
+
 EOF
 )
 
