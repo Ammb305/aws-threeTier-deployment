@@ -4,7 +4,7 @@
   become: yes
   vars:
     repo_url: "https://github.com/Ammb305/aws-threeTier-deployment.git"
-    branch_name: "feature/add-logging"
+    branch_name: "main"
     repo_dir: "/home/ubuntu/aws-threeTier-deployment/frontend"
     env_file: "{{ repo_dir }}/.env"
     app_tier_alb_url: "http://internal-application-loadBalancer-1640222318.us-east-1.elb.amazonaws.com"  # Replace with your actual ALB endpoint

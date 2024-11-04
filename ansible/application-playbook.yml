@@ -4,7 +4,7 @@
   become: yes
   vars:
     repo_url: "https://github.com/Ammb305/aws-threeTier-deployment.git"
-    branch_name: "feature/add-logging"
+    branch_name: "main"
     repo_dir: "/home/ubuntu/aws-threeTier-deployment/backend"
     env_file: "{{ repo_dir }}/.env"
     log_dir: "{{ repo_dir }}/logs"
@@ -38,7 +38,7 @@
     - name: Clone the repository
       git:
         repo: "{{ repo_url }}"
-        dest: /home/ubuntu/react-node-mysql-app
+        dest: /home/ubuntu/aws-threeTier-deployment
         version: "{{ branch_name }}"
         force: yes
         update: yes
