@@ -1,0 +1,89 @@
+---
+- name: Deploy Node.js application on Ubuntu host
+  hosts: application
+  become: yes
+  vars:
+    repo_url: "https://github.com/Ammb305/aws-threeTier-deployment.git"
+    branch_name: "feature/add-logging"
+    repo_dir: "/home/ubuntu/aws-threeTier-deployment/backend"
+    env_file: "{{ repo_dir }}/.env"
+    log_dir: "{{ repo_dir }}/logs"
+    db_host: "terraform-20241104123538121200000003.c5g22ewq4ztf.us-east-1.rds.amazonaws.com"  # Replace with actual endpoint
+    db_port: "3306"
+    db_user: "admin"  # Replace with actual username
+    db_password: "admin123"  # Replace with actual password
+    db_name: "MySQLdatabase"  # Replace with actual database name
+
+  tasks:
+    - name: Update package list and install required packages
+      apt:
+        update_cache: yes
+        name:
+          - git
+          - curl
+        state: present
+
+    - name: Install Node.js (latest LTS version)
+      shell: |
+        curl -fsSL https://deb.nodesource.com/setup_18.x | sudo bash - 
+        sudo apt-get install -y nodejs
+      args:
+        executable: /bin/bash
+
+    - name: Install PM2 globally
+      npm:
+        name: pm2
+        global: yes
+
+    - name: Clone the repository
+      git:
+        repo: "{{ repo_url }}"
+        dest: /home/ubuntu/react-node-mysql-app
+        version: "{{ branch_name }}"
+        force: yes
+        update: yes
+      become_user: ubuntu
+
+    - name: Ensure the log directory exists and set permissions
+      file:
+        path: "{{ log_dir }}"
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        mode: '0755'
+
+    - name: Append environment variables to the .env file
+      lineinfile:
+        path: "{{ env_file }}"
+        create: yes
+        line: "{{ item }}"
+      loop:
+        - "LOG_DIR={{ log_dir }}"
+        - "DB_HOST=\"{{ db_host }}\""
+        - "DB_PORT=\"{{ db_port }}\""
+        - "DB_USER=\"{{ db_user }}\""
+        - "DB_PASSWORD=\"{{ db_password }}\""
+        - "DB_NAME=\"{{ db_name }}\""
+      become_user: ubuntu
+
+    - name: Install Node.js dependencies
+      npm:
+        path: /home/ubuntu/aws-threeTier-deployment/backend
+        production: no
+      become_user: ubuntu
+
+    - name: Start the application using PM2
+      shell: |
+        pm2 start npm --name "my-app" -- run serve
+        pm2 save
+      args:
+        executable: /bin/bash
+      become_user: ubuntu
+
+    - name: Ensure PM2 restarts on reboot
+      shell: |
+        pm2 startup systemd --user ubuntu --hp /home/ubuntu
+        pm2 save
+      args:
+        executable: /bin/bash
+      become_user: ubuntu

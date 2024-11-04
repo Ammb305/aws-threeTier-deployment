@@ -8,7 +8,7 @@ resource "aws_security_group" "Bastion_Host" {
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = ["156.204.184.28/32"]
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
   egress {
@@ -49,22 +49,23 @@ resource "aws_security_group" "Presentation_ALB" {
 }
 
 # Presentation EC2 Security Group
+# Presentation EC2 Security Group
 resource "aws_security_group" "Presentation_EC2" {
   name        = "Presentation EC2 HTTP" 
   description = "Allow HTTP access to Presentation EC2"
   vpc_id      = aws_vpc.main.id
 
   ingress {
-    from_port       = 22
-    to_port         = 22
-    protocol        = "tcp"
-    cidr_blocks = ["156.204.184.28/32"]
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]  # Allow SSH from anywhere (for testing purposes, restrict in production)
   }
 
   ingress {
-    from_port       = 80
-    to_port         = 80
-    protocol        = "tcp"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
     security_groups = [aws_security_group.Presentation_ALB.id]  # HTTP from Application ALB
   }
 
@@ -76,7 +77,7 @@ resource "aws_security_group" "Presentation_EC2" {
   }
 
   tags = {
-    Name = "Presentation Tier EC2"
+    Name = "Presentation EC2 HTTP"
   }
 }
 
@@ -115,7 +116,8 @@ resource "aws_security_group" "Application_EC2" {
     from_port       = 22
     to_port         = 22
     protocol        = "tcp"
-    security_groups = [aws_security_group.Bastion_Host.id]  # SSH from Bastion Host
+    # security_groups = [aws_security_group.Bastion_Host.id]  # SSH from Bastion Host
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
   ingress {
@@ -147,14 +149,14 @@ resource "aws_security_group" "Database" {
     from_port       = 3306
     to_port         = 3306
     protocol        = "tcp"
-    security_groups = [aws_security_group.Application_EC2.id]  # MySQL from Application EC2
+    security_groups = [aws_security_group.Bastion_Host.id]  # MySQL from Application EC2
   }
 
   ingress {
     from_port       = 3306
     to_port         = 3306
     protocol        = "tcp"
-    security_groups = [aws_security_group.Bastion_Host.id]  # MySQL from Bastion Host (if needed)
+    security_groups = [aws_security_group.Application_ALB.id]  # MySQL from Bastion Host
   }
 
   egress {

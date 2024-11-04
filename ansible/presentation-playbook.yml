@@ -1,0 +1,147 @@
+---
+- name: Deploy frontend on Ubuntu (Presentation Hosts)
+  hosts: presentation
+  become: yes
+  vars:
+    repo_url: "https://github.com/Ammb305/aws-threeTier-deployment.git"
+    branch_name: "feature/add-logging"
+    repo_dir: "/home/ubuntu/aws-threeTier-deployment/frontend"
+    env_file: "{{ repo_dir }}/.env"
+    app_tier_alb_url: "http://internal-application-loadBalancer-1640222318.us-east-1.elb.amazonaws.com"  # Replace with your actual ALB endpoint
+    api_url: "/api"
+    server_name: "learningdevops.site"  # Replace with your actual domain name
+    nginx_conf: "/etc/nginx/nginx.conf"
+    nginx_root_dir: "/usr/share/nginx/html"
+
+  tasks:
+    - name: Update package list and install required packages
+      apt:
+        update_cache: yes
+        name:
+          - git
+          - curl
+          - nginx
+        state: present
+
+    - name: Install Node.js (latest LTS version)
+      shell: |
+        curl -fsSL https://deb.nodesource.com/setup_18.x | sudo bash -
+        sudo apt-get install -y nodejs
+      args:
+        executable: /bin/bash
+
+    - name: Start and enable NGINX
+      systemd:
+        name: nginx
+        state: started
+        enabled: yes
+
+    - name: Clone the repository
+      git:
+        repo: "{{ repo_url }}"
+        dest: "/home/ubuntu/aws-threeTier-deployment"
+        version: "{{ branch_name }}"
+        force: yes
+        accept_hostkey: yes
+
+    - name: Set ownership of the repository directory
+      file:
+        path: "/home/ubuntu/aws-threeTier-deployment"
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        recurse: yes
+
+    - name: Create .env file for the frontend
+      copy:
+        dest: "{{ env_file }}"
+        content: |
+          VITE_API_URL="{{ api_url }}"
+
+    - name: Install Node.js dependencies for frontend
+      npm:
+        path: "{{ repo_dir }}"
+        production: false
+
+    - name: Build the frontend application
+      shell: npm run build
+      args:
+        chdir: "{{ repo_dir }}"
+      become_user: ubuntu
+
+    - name: Copy build files to NGINX directory
+      copy:
+        src: "{{ repo_dir }}/dist/"
+        dest: "{{ nginx_root_dir }}/"
+        owner: www-data
+        group: www-data
+        mode: 0755
+        remote_src: yes
+
+    - name: Backup existing NGINX configuration
+      copy:
+        src: "{{ nginx_conf }}"
+        dest: "{{ nginx_conf }}.bak"
+        remote_src: yes
+
+    - name: Write new NGINX configuration
+      blockinfile:
+        path: "{{ nginx_conf }}"
+        create: yes
+        block: |
+          user www-data;
+          worker_processes auto;
+          pid /run/nginx.pid;
+
+          events {
+              worker_connections 768;
+          }
+
+          http {
+              sendfile on;
+              tcp_nopush on;
+              tcp_nodelay on;
+              keepalive_timeout 65;
+              types_hash_max_size 2048;
+
+              include /etc/nginx/mime.types;
+              default_type application/octet-stream;
+
+              access_log /var/log/nginx/access.log;
+              error_log /var/log/nginx/error.log;
+
+              include /etc/nginx/conf.d/*.conf;
+          }
+
+    - name: Create NGINX server block for the presentation tier
+      copy:
+        dest: /etc/nginx/conf.d/presentation-tier.conf
+        content: |
+          server {
+              listen 80;
+              server_name {{ server_name }};
+              root {{ nginx_root_dir }}/dist;
+              index index.html index.htm;
+
+              location /health {
+                  default_type text/html;
+                  return 200 "<!DOCTYPE html><p>Health check endpoint</p>\n";
+              }
+
+              location / {
+                  try_files $uri /index.html;
+              }
+
+              location /api/ {
+                  proxy_pass {{ app_tier_alb_url }};
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+              }
+          }
+
+    - name: Restart NGINX to apply the new configuration
+      systemd:
+        name: nginx
+        state: restarted
