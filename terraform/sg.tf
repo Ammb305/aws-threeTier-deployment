@@ -157,6 +157,7 @@ resource "aws_security_group" "Database" {
     to_port         = 3306
     protocol        = "tcp"
     security_groups = [aws_security_group.Application_ALB.id]  # MySQL from Bastion Host
+    security_groups = [aws_security_group.Application_EC2.id]  # MySQL from Bastion Host
   }
 
   egress {
